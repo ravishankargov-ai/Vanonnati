@@ -2,7 +2,7 @@
 //  Vanonnati — Service Worker  (v2)
 //  Network-first for the app HTML so updates always appear.
 // ============================================================
-const CACHE_NAME = 'vanonnati-v2';
+const CACHE_NAME = 'vanonnati-v4';
 const ASSETS = ['./','./index.html','./manifest.json','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install', event => {

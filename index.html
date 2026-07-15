@@ -133,6 +133,9 @@
   .task-checkbox{width:18px;height:18px;border-radius:5px;border:2px solid var(--border);cursor:pointer;flex-shrink:0;margin-top:2px;display:flex;align-items:center;justify-content:center;transition:all .15s;background:white;}
   .task-checkbox.checked{background:var(--done);border-color:var(--done);}
   .task-checkbox.checked::after{content:'✓';color:white;font-size:11px;font-weight:700;}
+  .task-checkbox.locked{border-color:#ddd;background:#f5f5f5;cursor:not-allowed;position:relative;}
+  .task-checkbox.locked::after{content:'🔒';font-size:9px;opacity:.6;}
+  .task-checkbox.checked.locked::after{content:'✓';color:#aaa;}
   .task-main{flex:1;min-width:0;}
   .task-title{font-size:14px;font-weight:600;color:var(--ink);margin-bottom:4px;display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
   .task-title.done-title{text-decoration:line-through;color:var(--ink-muted);}
@@ -343,6 +346,7 @@
     </div>
     <div class="header-right">
       <div id="syncBadge" class="sync-badge sync-ok">● Live</div>
+      <button class="btn btn-ghost btn-sm" id="identityBadge" onclick="openIdentityModal(false)" title="Set which officer is using this device" style="font-weight:600;">👤 Set who I am</button>
       <button class="btn btn-ghost btn-sm" id="viewToggleBtn" onclick="toggleMainView()">📊 Dashboard</button>
       <button class="btn btn-ghost btn-sm" onclick="refreshTasks()">↻ Refresh</button>
       <button class="btn btn-primary btn-sm" onclick="openModal()">＋ Add Task</button>
@@ -566,6 +570,15 @@
       <button class="icon-btn" onclick="closeModal()">✕</button>
     </div>
     <div class="modal-body">
+      <div class="form-row" id="ownerRow">
+        <div class="form-group" style="flex:1">
+          <label class="form-label" style="color:var(--accent);font-weight:700;">Added By (Task Owner) *</label>
+          <select class="form-select" id="f_owner"></select>
+          <div style="font-size:11px;color:var(--ink-muted);margin-top:4px;line-height:1.5;">
+            Only this officer will be able to edit, reschedule, complete, or delete this task. Others can view it.
+          </div>
+        </div>
+      </div>
       <div class="form-row">
         <div class="form-group" style="flex:2">
           <label class="form-label">Task Title *</label>
@@ -877,6 +890,155 @@
   </div>
 </div>
 
+<!-- ── Identity ("Who am I") + PIN Modal ── -->
+<div class="modal-overlay" id="identityModalOverlay">
+  <div class="modal" style="max-width:440px;">
+    <div class="modal-header">
+      <h3>👤 Who is using this device?</h3>
+      <button class="icon-btn" id="identityCancelBtn" onclick="closeIdentityModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--ink-muted);line-height:1.6;margin:0 0 12px;">
+        Select your designation, then enter your PIN. This identifies you as the officer on this device, so only you can manage your own tasks.
+      </p>
+      <div id="identityForcedNote" style="display:none;background:#fff8e1;border:1px solid #ffd700;color:#92400e;padding:9px 12px;border-radius:6px;font-size:12px;line-height:1.6;margin-bottom:12px;">
+        Please identify yourself before adding a task. Only the officer who adds a task can later edit or complete it.
+      </div>
+      <div class="form-group">
+        <label class="form-label">My Designation *</label>
+        <select class="form-select" id="identitySelect" onchange="onIdentitySelectChange()"></select>
+      </div>
+
+      <!-- PIN entry (existing PIN) -->
+      <div class="form-group" id="pinEntryRow" style="display:none;">
+        <label class="form-label">Enter your PIN *</label>
+        <input class="form-input" id="pinEntry" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="4–6 digit PIN">
+      </div>
+
+      <!-- PIN creation (first time) -->
+      <div id="pinCreateBlock" style="display:none;">
+        <div style="background:#eff6ff;border:1px solid #bcd7f5;color:#1e3a5f;padding:9px 12px;border-radius:6px;font-size:12px;line-height:1.6;margin-bottom:10px;">
+          🔐 First time for this designation. Create a PIN (4–6 digits). You'll need it whenever you identify yourself on any device. Keep it private.
+        </div>
+        <div class="form-group">
+          <label class="form-label">Create PIN *</label>
+          <input class="form-input" id="pinNew1" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="4–6 digits">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirm PIN *</label>
+          <input class="form-input" id="pinNew2" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="Re-enter PIN">
+        </div>
+      </div>
+
+      <div id="identityMsg" style="color:var(--overdue);font-size:12px;margin-top:8px;"></div>
+
+      <div style="margin-top:14px;border-top:1px solid var(--border-light);padding-top:10px;">
+        <button class="btn btn-ghost btn-sm" style="font-size:12px;" onclick="openAdminModal()">🛡️ Admin / Supervisor</button>
+        <span style="font-size:11px;color:var(--ink-muted);">— unlock or reassign tasks, reset a PIN</span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-accent" id="identitySaveBtn" onclick="saveIdentity()">Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Admin / Supervisor Modal ── -->
+<div class="modal-overlay" id="adminModalOverlay">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-header">
+      <h3>🛡️ Admin / Supervisor</h3>
+      <button class="icon-btn" onclick="closeAdminModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- Step 1: master PIN login -->
+      <div id="adminLoginBlock">
+        <p style="font-size:13px;color:var(--ink-muted);line-height:1.6;margin:0 0 12px;">
+          Enter the master PIN to manage officers and tasks.
+        </p>
+        <div class="form-group">
+          <label class="form-label">Master PIN *</label>
+          <input class="form-input" id="adminPin" type="password" inputmode="numeric" maxlength="12" autocomplete="off" placeholder="Master PIN">
+        </div>
+        <div id="adminLoginMsg" style="color:var(--overdue);font-size:12px;margin-top:6px;"></div>
+        <div class="modal-footer" style="padding:14px 0 0;">
+          <button class="btn btn-accent" onclick="adminLogin()">Unlock Admin</button>
+        </div>
+      </div>
+
+      <!-- Step 2: forced master PIN change (first use) -->
+      <div id="adminChangeBlock" style="display:none;">
+        <div style="background:#fff8e1;border:1px solid #ffd700;color:#92400e;padding:9px 12px;border-radius:6px;font-size:12px;line-height:1.6;margin-bottom:12px;">
+          ⚠️ This is the first Admin login. You must set a new master PIN now. The placeholder PIN will stop working.
+        </div>
+        <div class="form-group">
+          <label class="form-label">New Master PIN *</label>
+          <input class="form-input" id="adminNew1" type="password" inputmode="numeric" maxlength="12" autocomplete="off" placeholder="4–12 digits">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirm New Master PIN *</label>
+          <input class="form-input" id="adminNew2" type="password" inputmode="numeric" maxlength="12" autocomplete="off" placeholder="Re-enter">
+        </div>
+        <div id="adminChangeMsg" style="color:var(--overdue);font-size:12px;margin-top:6px;"></div>
+        <div class="modal-footer" style="padding:14px 0 0;">
+          <button class="btn btn-accent" onclick="adminSetMaster()">Set Master PIN</button>
+        </div>
+      </div>
+
+      <!-- Step 3: admin actions -->
+      <div id="adminPanelBlock" style="display:none;">
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+          <button class="btn btn-ghost btn-sm" id="adminTabReset" onclick="adminShowTab('reset')">🔁 Reset a PIN</button>
+          <button class="btn btn-ghost btn-sm" id="adminTabReassign" onclick="adminShowTab('reassign')">↪️ Reassign a Task</button>
+          <button class="btn btn-ghost btn-sm" id="adminTabMaster" onclick="adminShowTab('master')">🔑 Change Master PIN</button>
+        </div>
+
+        <!-- Reset a PIN -->
+        <div id="adminResetTab">
+          <p style="font-size:12px;color:var(--ink-muted);line-height:1.6;margin:0 0 10px;">
+            Clear an officer's PIN. They'll set a new one next time they identify themselves. Their tasks stay theirs.
+          </p>
+          <div class="form-group">
+            <label class="form-label">Officer</label>
+            <select class="form-select" id="adminResetOfficer"></select>
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="adminResetPin()">Reset this officer's PIN</button>
+        </div>
+
+        <!-- Reassign a task -->
+        <div id="adminReassignTab" style="display:none;">
+          <p style="font-size:12px;color:var(--ink-muted);line-height:1.6;margin:0 0 10px;">
+            Move a task to a different owner (e.g. when an officer is transferred).
+          </p>
+          <div class="form-group">
+            <label class="form-label">Task</label>
+            <select class="form-select" id="adminReassignTask"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">New Owner</label>
+            <select class="form-select" id="adminReassignOwner"></select>
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="adminReassignTask()">Reassign task</button>
+        </div>
+
+        <!-- Change master PIN -->
+        <div id="adminMasterTab" style="display:none;">
+          <div class="form-group">
+            <label class="form-label">New Master PIN *</label>
+            <input class="form-input" id="adminChgNew1" type="password" inputmode="numeric" maxlength="12" autocomplete="off" placeholder="4–12 digits">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Confirm *</label>
+            <input class="form-input" id="adminChgNew2" type="password" inputmode="numeric" maxlength="12" autocomplete="off" placeholder="Re-enter">
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="adminChangeMaster()">Update Master PIN</button>
+        </div>
+
+        <div id="adminActionMsg" style="font-size:12px;margin-top:12px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- ── Export Modal ── -->
 <div class="modal-overlay" id="exportModalOverlay">
@@ -1019,6 +1181,7 @@
 const STORE_KEY   = 'vanonnati_tasks_v1';
 const URL_KEY     = 'vanonnati_script_url';
 const OFFLINE_KEY = 'vanonnati_offline';
+const IDENTITY_KEY = 'vanonnati_my_identity';   // which officer is using THIS device
 
 const ALL_WS = [
   // A. Governance & Administration
@@ -1048,11 +1211,14 @@ let currentView = 'all';
 let pendingSubs = [];
 let scriptUrl   = '';
 let isOffline   = false;
+let myIdentity  = '';   // the officer operating this device
 
 // ── Boot ──────────────────────────────────────────────────────
 window.onload = function() {
   scriptUrl = localStorage.getItem(URL_KEY) || '';
   isOffline = localStorage.getItem(OFFLINE_KEY) === '1';
+  myIdentity = getIdentity();
+  myPinHash = localStorage.getItem(IDENTITY_KEY+'_h') || '';
   if (scriptUrl || isOffline) launchApp();
 };
 
@@ -1099,6 +1265,7 @@ function changeServer() {
 function launchApp() {
   document.getElementById('setupScreen').style.display = 'none';
   document.getElementById('mainApp').style.display = 'block';
+  updateIdentityBadge();
   if (isOffline) {
     document.getElementById('offlineBar').classList.add('show');
     tasks = loadLocal(); renderTasks(); checkAlerts();
@@ -1107,6 +1274,7 @@ function launchApp() {
     setInterval(refreshTasks, 60000);
     setInterval(checkAlerts, 30000);
   }
+  if(!myIdentity){ setTimeout(()=>openIdentityModal(false), 600); }
 }
 
 // ── API ───────────────────────────────────────────────────────
@@ -1143,7 +1311,7 @@ async function pushTask(task) {
   if (isOffline) { saveLocal(tasks); return; }
   setSyncBadge('saving', 'Saving…');
   try {
-    const data = await gasRequest({ action:'saveTask', payload: JSON.stringify(task) });
+    const data = await gasRequest({ action:'saveTask', payload: JSON.stringify(task), actor: myIdentity, actorHash: myPinHash });
     if (data.error) throw new Error(data.error);
     saveLocal(tasks);
     setSyncBadge('ok', 'Saved ✓');
@@ -1158,7 +1326,7 @@ async function pushDelete(id) {
   if (isOffline) { saveLocal(tasks); return; }
   setSyncBadge('saving', 'Deleting…');
   try {
-    const data = await gasRequest({ action:'deleteTask', id });
+    const data = await gasRequest({ action:'deleteTask', id, actor: myIdentity, actorHash: myPinHash });
     if (data.error) throw new Error(data.error);
     saveLocal(tasks);
     setSyncBadge('ok', 'Live');
@@ -1346,10 +1514,14 @@ function renderCard(t) {
       <div>${esc(t.notes)}</div>
     </div>`:''
 
+  const mine = canEdit(t);
+  const ownerBadge = t.owner
+    ? `<span class="chip" title="Task owner — only they can edit or complete" style="background:${mine?'#e6f4ea':'#f1f1f1'};color:${mine?'#1a7a4a':'#777'};border:1px solid ${mine?'#b7e0c4':'#ddd'};">${mine?'✎ Yours':'🔒 '+esc(t.owner)}</span>`
+    : '';
   return `
   <div class="task-card border-${t.priority}" id="card-${t.id}" style="${t.done?'opacity:.65':''}">
     <div class="task-header" onclick="toggleCard('${t.id}')">
-      <div class="task-checkbox ${t.done?'checked':''}" onclick="event.stopPropagation();toggleDone('${t.id}')"></div>
+      <div class="task-checkbox ${t.done?'checked':''}${mine?'':' locked'}" onclick="event.stopPropagation();toggleDone('${t.id}')" title="${mine?'Mark complete':'Only the owner can complete this task'}"></div>
       <div class="task-main">
         <div class="task-title ${t.done?'done-title':''}">
           ${esc(t.title)}
@@ -1358,6 +1530,7 @@ function renderCard(t) {
         </div>
         <div class="task-meta">
           <span class="chip">${esc(wsLabel)}</span>
+          ${ownerBadge}
           ${t.officer?`<span>👤 ${esc(t.officer)}</span><span style="color:var(--border)">·</span>`:''}
           ${t.duration?`<span>⏱ ${esc(t.duration)}</span><span style="color:var(--border)">·</span>`:''}
           <span class="due-indicator ${dc}">${dl}</span>
@@ -1365,8 +1538,10 @@ function renderCard(t) {
         </div>
       </div>
       <div class="task-actions" onclick="event.stopPropagation()">
-        <button class="icon-btn" title="Edit" onclick="editTask('${t.id}')">✏️</button>
-        <button class="icon-btn" title="Delete" onclick="deleteTask('${t.id}')">🗑️</button>
+        ${mine
+          ? `<button class="icon-btn" title="Edit" onclick="editTask('${t.id}')">✏️</button>
+             <button class="icon-btn" title="Delete" onclick="deleteTask('${t.id}')">🗑️</button>`
+          : `<button class="icon-btn" title="View (read-only)" onclick="viewTask('${t.id}')">👁️</button>`}
       </div>
     </div>
     ${prog>0||subs.length?`<div class="progress-wrap"><div class="progress-bar"><div class="progress-fill fill-${t.priority}" style="width:${prog}%"></div></div><span class="progress-pct">${prog}%</span></div>`:''}
@@ -1381,12 +1556,20 @@ function toggleCard(id) {
 }
 function toggleDone(id) {
   const t=tasks.find(x=>x.id===id); if(!t) return;
+  if(!canEdit(t)){
+    alert('This task was added by "'+(t.owner||'another officer')+'".\n\nOnly that officer can mark it complete. You can view it and generate reports.');
+    return;
+  }
   t.done=!t.done; t.status=t.done?'done':'in-progress';
   if(t.done) t.completedDate=today(); else delete t.completedDate;
   renderTasks(); checkAlerts(); pushTask(t);
 }
 function toggleSubtask(taskId,subId) {
   const t=tasks.find(x=>x.id===taskId); if(!t) return;
+  if(!canEdit(t)){
+    alert('Only the officer who added this task ("'+(t.owner||'another officer')+'") can update its milestones.');
+    return;
+  }
   const s=(t.subtasks||[]).find(x=>x.id===subId); if(!s) return;
   s.done=!s.done;
   const prog=subtaskProgress(t);
@@ -1394,6 +1577,11 @@ function toggleSubtask(taskId,subId) {
   renderTasks(); pushTask(t);
 }
 function deleteTask(id) {
+  const t=tasks.find(x=>x.id===id); if(!t) return;
+  if(!canEdit(t)){
+    alert('This task was added by "'+(t.owner||'another officer')+'".\n\nOnly that officer can delete it.');
+    return;
+  }
   if(!confirm('Delete this task and all its milestones?')) return;
   tasks=tasks.filter(t=>t.id!==id);
   renderTasks(); checkAlerts(); pushDelete(id);
@@ -1407,9 +1595,19 @@ function setView(v) {
 
 // ── Modal ─────────────────────────────────────────────────────
 function openModal(id) {
+  if(!id && !myIdentity){ openIdentityModal(true); return; }
   editingId=id||null; pendingSubs=[];
+  const ownerSel=document.getElementById('f_owner');
   if(id){
     const t=tasks.find(x=>x.id===id); if(!t) return;
+    if(!canEdit(t)){
+      alert('This task was added by "'+(t.owner||'another officer')+'".\n\nOnly that officer can edit, reschedule, or complete it. You can view it, and you can still generate reports.');
+      return;
+    }
+    ownerSel.innerHTML=officerOptionsHtml(t.owner||myIdentity);
+    ownerSel.value=t.owner||myIdentity;
+    ownerSel.disabled=true;
+    document.getElementById('ownerRow').style.opacity='.75';
     document.getElementById('modalTitle').textContent='Edit Task';
     document.getElementById('f_title').value=t.title||'';
     document.getElementById('f_workstream').value=t.workstream||'CabinetIssues';
@@ -1422,6 +1620,10 @@ function openModal(id) {
     pendingSubs=(t.subtasks||[]).map(s=>({...s}));
   } else {
     document.getElementById('modalTitle').textContent='Add New Task';
+    ownerSel.innerHTML=officerOptionsHtml(myIdentity);
+    ownerSel.value=myIdentity;
+    ownerSel.disabled=false;
+    document.getElementById('ownerRow').style.opacity='1';
     ['f_title','f_duration','f_notes','f_due'].forEach(id=>document.getElementById(id).value='');
     document.getElementById('f_officer').value='';
     document.getElementById('f_priority').value='medium';
@@ -1458,6 +1660,12 @@ function addSubtaskField(){
 
 async function saveTask(){
   const title=document.getElementById('f_title').value.trim();
+  const owner=document.getElementById('f_owner').value;
+  if(!owner){
+    alert('Please select "Added By (Task Owner)" — this is required.\n\nOnly the selected officer will be able to edit or complete this task.');
+    document.getElementById('f_owner').focus();
+    return;
+  }
   if(!title){ document.getElementById('f_title').focus(); return; }
   document.getElementById('saveBtn').disabled=true;
   document.getElementById('saveBtn').textContent='Saving…';
@@ -1477,9 +1685,20 @@ async function saveTask(){
 
   if(editingId){
     const idx=tasks.findIndex(t=>t.id===editingId);
-    if(idx>=0){ tasks[idx]={...tasks[idx],...data}; if(data.done&&!tasks[idx].completedDate) tasks[idx].completedDate=today(); }
+    if(idx>=0){
+      if(!canEdit(tasks[idx])){
+        alert('Only the officer who added this task can edit it.');
+        document.getElementById('saveBtn').disabled=false;
+        document.getElementById('saveBtn').textContent='Save Task';
+        return;
+      }
+      tasks[idx]={...tasks[idx],...data};
+      if(data.done&&!tasks[idx].completedDate) tasks[idx].completedDate=today();
+    }
   } else {
     data.id=uid(); data.created=today();
+    data.owner=owner;
+    if(!myIdentity) setIdentity(owner);
     tasks.unshift(data);
   }
 
@@ -1511,6 +1730,351 @@ const OFFICERS = [
   'DFO Kedarnath WL','DFO Nanda Devi NP',
   'Others'
 ];
+
+
+// ── Device identity ("Who am I") + task ownership ──────────────
+function officerOptionsHtml(selected){
+  let h = '<option value="">— Select Officer —</option>';
+  h += `<optgroup label="PCCF Level">
+              <option value="PCCF HoFF">PCCF (Head of Forest Force)</option>
+              <option value="PCCF Van Panchayat">PCCF (Van Panchayat)</option>
+              <option value="PCCF Wildlife">PCCF (Wild Life)</option>
+            </optgroup>
+            <optgroup label="APCCF Offices">
+              <option value="APCCF Land Survey">APCCF (Land Survey Directorate)</option>
+              <option value="APCCF RTM">APCCF (RTM)</option>
+              <option value="APCCF PFM">APCCF (PFM)</option>
+              <option value="APCCF Projects">APCCF (Projects)</option>
+            </optgroup>
+            <optgroup label="Chief Conservator of Forests (CCF)">
+              <option value="CCF Garhwal">CCF (Garhwal)</option>
+              <option value="CCF Kumaon">CCF (Kumaon)</option>
+              <option value="CCF Environment">CCF (Environment)</option>
+              <option value="CCF HRD">CCF (HRD)</option>
+              <option value="CCF Eco-Tourism">CCF (Eco-Tourism &amp; Publicity)</option>
+              <option value="CCF Working Plan">CCF (Working Plan)</option>
+              <option value="CCF MEA">CCF (Monitoring, Evaluation &amp; Audit)</option>
+              <option value="CCF Administration">CCF (Administration)</option>
+              <option value="CCF Vigilance Legal">CCF (Vigilance and Legal)</option>
+              <option value="CCF UFTA">CCF (UFTA)</option>
+              <option value="CCF Utilisation NTFP">CCF (Utilisation &amp; NTFP)</option>
+              <option value="CCF Forest Fire DM">CCF (Forest Fire Protection &amp; Disaster Management)</option>
+              <option value="CCF Administration Wildlife">CCF (Administration, Wildlife)</option>
+              <option value="CCF Van Panchayat CF">CCF (Van Panchayat &amp; Community Forestry)</option>
+            </optgroup>
+            <optgroup label="Conservator of Forests (CF)">
+              <option value="CF Research">CF (Research)</option>
+              <option value="CF Bhagirathi">CF (Bhagirathi)</option>
+              <option value="CF Yamuna">CF (Yamuna)</option>
+              <option value="CF Garhwal">CF (Garhwal)</option>
+              <option value="CF Shivalik">CF (Shivalik)</option>
+              <option value="CF North Kumaun">CF (North Kumaun)</option>
+              <option value="CF Western">CF (Western)</option>
+              <option value="CF South Kumaun">CF (South Kumaun)</option>
+              <option value="CF Land Survey">CF Land Survey Directorate</option>
+              <option value="CF FTA">CF FTA</option>
+              <option value="CF WPO">CF WPO</option>
+            </optgroup>
+            <optgroup label="Territorial &amp; Non-territorial Divisions (DFOs)">
+              <option value="DFO Soil Uttarkashi">DFO Soil, Uttarkashi</option>
+              <option value="DFO Tehri Dam I">DFO Tehri Dam-I</option>
+              <option value="DFO Tehri Dam II">DFO Tehri Dam-II</option>
+              <option value="DFO New Tehri">DFO New Tehri</option>
+              <option value="DFO Uttarkashi">DFO Uttarkashi</option>
+              <option value="DFO Narendra Nagar">DFO Narendra Nagar</option>
+              <option value="DFO Mussoorie">DFO Mussoorie</option>
+              <option value="DFO Upper Yamuna Barkot">DFO Upper Yamuna Barkot</option>
+              <option value="DFO Tons">DFO Tons</option>
+              <option value="DFO Chakrata">DFO Chakrata</option>
+              <option value="DFO Garhwal Div">DFO Garhwal</option>
+              <option value="DFO Rudraprayag">DFO Rudraprayag</option>
+              <option value="DFO Badrinath">DFO Badrinath</option>
+              <option value="DFO Soil Alaknanda">DFO Soil Alaknanda</option>
+              <option value="DFO Civil Soyam Pauri">DFO Civil &amp; Soyam Pauri</option>
+              <option value="DFO Dehradun">DFO Dehradun</option>
+              <option value="DFO Lansdowne">DFO Lansdowne</option>
+              <option value="DFO Haridwar">DFO Haridwar</option>
+              <option value="DFO Soil Kalsi">DFO Soil Kalsi</option>
+              <option value="DFO Soil Lansdowne">DFO Soil Lansdowne</option>
+              <option value="DFO Bageshwar">DFO Bageshwar</option>
+              <option value="DFO Almora">DFO Almora</option>
+              <option value="DFO Civil Soyam Almora">DFO Civil &amp; Soyam Almora</option>
+              <option value="DFO Pithoragarh">DFO Pithoragarh</option>
+              <option value="DFO Champawat">DFO Champawat</option>
+              <option value="DFO Haldwani">DFO Haldwani</option>
+              <option value="DFO Tarai East">DFO Tarai East</option>
+              <option value="DFO Tarai West">DFO Tarai West</option>
+              <option value="DFO Tarai Central">DFO Tarai Central</option>
+              <option value="DFO Ramnagar">DFO Ramnagar</option>
+              <option value="DFO Nainital">DFO Nainital</option>
+              <option value="DFO Soil Nainital">DFO Soil Nainital</option>
+              <option value="DFO Soil Ranikhet">DFO Soil Ranikhet</option>
+              <option value="DFO Soil Ramnagar">DFO Soil Ramnagar</option>
+              <option value="DCF Research">DCF Research</option>
+              <option value="DCF FTA">DCF FTA</option>
+              <option value="DCF ME IT">DCF M&amp;E, IT</option>
+              <option value="DCF PFM">DCF PFM</option>
+            </optgroup>
+            <optgroup label="Wildlife Directors / CFs">
+              <option value="Director Rajaji">Director, Rajaji National Park</option>
+              <option value="Director Nanda Devi">Director, Nanda Devi Biosphere Reserve</option>
+              <option value="Director Corbett">Director, Corbett Tiger Reserve</option>
+            </optgroup>
+            <optgroup label="Deputy Directors (Wildlife)">
+              <option value="DD Rajaji">Deputy Director, Rajaji National Park</option>
+              <option value="DD Kalagarh">Deputy Director, Kalagarh Tiger Reserve Division</option>
+              <option value="DD Corbett">Deputy Director, Corbett National Park</option>
+              <option value="DD Govind WLS">Deputy Director, Govind Wildlife Sanctuary</option>
+              <option value="DD Gangotri">Deputy Director, Gangotri National Park</option>
+            </optgroup>
+            <optgroup label="Wildlife DFOs">
+              <option value="DFO Kedarnath WL">DFO Kedarnath Wildlife Division</option>
+              <option value="DFO Nanda Devi NP">DFO Nanda Devi National Park</option>
+            </optgroup>`;
+  h += '<option value="Others">Others</option>';
+  // mark selected
+  if(selected){
+    h = h.replace('value="'+selected+'"', 'value="'+selected+'" selected');
+  }
+  return h;
+}
+function getIdentity(){ return localStorage.getItem(IDENTITY_KEY) || ''; }
+function setIdentity(v){
+  myIdentity = v || '';
+  if(myIdentity) localStorage.setItem(IDENTITY_KEY, myIdentity);
+  else localStorage.removeItem(IDENTITY_KEY);
+  updateIdentityBadge();
+}
+function updateIdentityBadge(){
+  const b = document.getElementById('identityBadge');
+  if(!b) return;
+  b.textContent = myIdentity ? ('👤 ' + myIdentity) : '👤 Set who I am';
+}
+// True if the current device-officer is allowed to modify this task
+function canEdit(t){
+  if(!t) return false;
+  if(!t.owner) return true;          // legacy tasks with no owner stay editable by all
+  return t.owner === myIdentity;     // only the owner may edit / complete / delete
+}
+
+// ── PIN crypto (SHA-256; plain PIN never leaves the device) ────
+const PIN_SALT = 'Vanonnati-2026-salt-v1';
+async function hashPin(officer, pin){
+  const enc = new TextEncoder();
+  const data = enc.encode(PIN_SALT + '::' + officer + '::' + pin);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function validPinFormat(p){ return /^[0-9]{4,6}$/.test(p); }
+
+// Credentials metadata cache: { officersWithPin:[...], adminMustChange:bool }
+let credMeta = { officersWithPin: [], adminMustChange: true };
+let myPinHash = '';   // the current identity's verified hash, kept in memory for backend writes
+
+async function loadCredMeta(){
+  if(isOffline) return credMeta;
+  try{
+    const d = await gasRequest({ action:'getCredMeta' });
+    if(d && !d.error){ credMeta = { officersWithPin: d.officersWithPin||[], adminMustChange: !!d.adminMustChange }; }
+  }catch(e){}
+  return credMeta;
+}
+
+// ── Identity modal flow ───────────────────────────────────────
+function openIdentityModal(forced){
+  const sel = document.getElementById('identitySelect');
+  sel.innerHTML = officerOptionsHtml('');
+  document.getElementById('identityForcedNote').style.display = forced ? 'block' : 'none';
+  document.getElementById('identityCancelBtn').style.display = forced ? 'none' : 'inline-block';
+  document.getElementById('identityMsg').textContent = '';
+  document.getElementById('pinEntry').value='';
+  document.getElementById('pinNew1').value='';
+  document.getElementById('pinNew2').value='';
+  document.getElementById('pinEntryRow').style.display='none';
+  document.getElementById('pinCreateBlock').style.display='none';
+  loadCredMeta().then(()=>{ /* meta ready for onIdentitySelectChange */ });
+  document.getElementById('identityModalOverlay').classList.add('open');
+}
+function closeIdentityModal(){ document.getElementById('identityModalOverlay').classList.remove('open'); }
+
+// When designation chosen, decide: ask for existing PIN, or create a new one
+function onIdentitySelectChange(){
+  const v = document.getElementById('identitySelect').value;
+  const entryRow = document.getElementById('pinEntryRow');
+  const createBlk = document.getElementById('pinCreateBlock');
+  document.getElementById('identityMsg').textContent='';
+  if(!v){ entryRow.style.display='none'; createBlk.style.display='none'; return; }
+  const hasPin = credMeta.officersWithPin.indexOf(v) !== -1;
+  if(hasPin){ entryRow.style.display='block'; createBlk.style.display='none'; }
+  else { entryRow.style.display='none'; createBlk.style.display='block'; }
+}
+
+async function saveIdentity(){
+  const v = document.getElementById('identitySelect').value;
+  const msg = document.getElementById('identityMsg');
+  if(!v){ msg.textContent='Please select your designation.'; return; }
+
+  const hasPin = credMeta.officersWithPin.indexOf(v) !== -1;
+  const btn = document.getElementById('identitySaveBtn');
+  btn.disabled = true;
+
+  try{
+    if(hasPin){
+      // Verify existing PIN
+      const pin = document.getElementById('pinEntry').value.trim();
+      if(!validPinFormat(pin)){ msg.textContent='Enter your 4–6 digit PIN.'; btn.disabled=false; return; }
+      const h = await hashPin(v, pin);
+      const res = await gasRequest({ action:'verifyPin', officer:v, hash:h });
+      if(!res || !res.ok){ msg.textContent='Incorrect PIN. Try again, or ask Admin to reset it.'; btn.disabled=false; return; }
+      myPinHash = h;
+    } else {
+      // Create a new PIN
+      const p1 = document.getElementById('pinNew1').value.trim();
+      const p2 = document.getElementById('pinNew2').value.trim();
+      if(!validPinFormat(p1)){ msg.textContent='PIN must be 4–6 digits.'; btn.disabled=false; return; }
+      if(p1!==p2){ msg.textContent='The two PINs do not match.'; btn.disabled=false; return; }
+      const h = await hashPin(v, p1);
+      const res = await gasRequest({ action:'setPin', officer:v, hash:h });
+      if(!res || !res.ok){
+        msg.textContent = (res && res.error==='exists')
+          ? 'A PIN already exists for this designation. Enter it instead, or ask Admin to reset.'
+          : 'Could not save PIN. Check connection and try again.';
+        btn.disabled=false;
+        await loadCredMeta(); onIdentitySelectChange();
+        return;
+      }
+      myPinHash = h;
+      if(credMeta.officersWithPin.indexOf(v)===-1) credMeta.officersWithPin.push(v);
+    }
+    setIdentity(v);
+    localStorage.setItem(IDENTITY_KEY+'_h', myPinHash);   // remember hash on this device
+    closeIdentityModal();
+    renderTasks();
+  }catch(e){
+    msg.textContent='Network error. Please try again.';
+  }
+  btn.disabled=false;
+}
+
+// ── Admin / Supervisor ────────────────────────────────────────
+let adminMasterHash = '';   // verified master hash, in memory during admin session
+const ADMIN_SALT = 'Vanonnati-ADMIN-2026';
+async function hashMaster(pin){
+  const enc = new TextEncoder();
+  const data = enc.encode(ADMIN_SALT + '::MASTER::' + pin);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function openAdminModal(){
+  document.getElementById('adminLoginBlock').style.display='block';
+  document.getElementById('adminChangeBlock').style.display='none';
+  document.getElementById('adminPanelBlock').style.display='none';
+  document.getElementById('adminPin').value='';
+  document.getElementById('adminLoginMsg').textContent='';
+  document.getElementById('adminModalOverlay').classList.add('open');
+}
+function closeAdminModal(){ document.getElementById('adminModalOverlay').classList.remove('open'); }
+
+async function adminLogin(){
+  const pin = document.getElementById('adminPin').value.trim();
+  const msg = document.getElementById('adminLoginMsg');
+  if(!pin){ msg.textContent='Enter the master PIN.'; return; }
+  const h = await hashMaster(pin);
+  try{
+    const res = await gasRequest({ action:'adminVerify', hash:h });
+    if(!res || !res.ok){ msg.textContent='Incorrect master PIN.'; return; }
+    adminMasterHash = h;
+    if(res.mustChange){
+      document.getElementById('adminLoginBlock').style.display='none';
+      document.getElementById('adminChangeBlock').style.display='block';
+    } else {
+      enterAdminPanel();
+    }
+  }catch(e){ msg.textContent='Network error. Try again.'; }
+}
+
+async function adminSetMaster(){
+  const p1 = document.getElementById('adminNew1').value.trim();
+  const p2 = document.getElementById('adminNew2').value.trim();
+  const msg = document.getElementById('adminChangeMsg');
+  if(!/^[0-9]{4,12}$/.test(p1)){ msg.textContent='Master PIN must be 4–12 digits.'; return; }
+  if(p1!==p2){ msg.textContent='PINs do not match.'; return; }
+  const newHash = await hashMaster(p1);
+  try{
+    const res = await gasRequest({ action:'adminSetMaster', oldHash:adminMasterHash, newHash:newHash });
+    if(!res || !res.ok){ msg.textContent='Could not update master PIN.'; return; }
+    adminMasterHash = newHash;
+    enterAdminPanel();
+  }catch(e){ msg.textContent='Network error. Try again.'; }
+}
+
+function enterAdminPanel(){
+  document.getElementById('adminLoginBlock').style.display='none';
+  document.getElementById('adminChangeBlock').style.display='none';
+  document.getElementById('adminPanelBlock').style.display='block';
+  // populate officer reset list (only those with PINs)
+  const ro = document.getElementById('adminResetOfficer');
+  ro.innerHTML = credMeta.officersWithPin.length
+    ? credMeta.officersWithPin.map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('')
+    : '<option value="">(no PINs set yet)</option>';
+  // populate reassign task + owner lists
+  const rt = document.getElementById('adminReassignTask');
+  rt.innerHTML = tasks.length
+    ? tasks.map(t=>`<option value="${esc(t.id)}">${esc((t.title||'').slice(0,50))} — ${esc(t.owner||'unowned')}</option>`).join('')
+    : '<option value="">(no tasks)</option>';
+  document.getElementById('adminReassignOwner').innerHTML = officerOptionsHtml('');
+  adminShowTab('reset');
+}
+function adminShowTab(which){
+  document.getElementById('adminResetTab').style.display = which==='reset'?'block':'none';
+  document.getElementById('adminReassignTab').style.display = which==='reassign'?'block':'none';
+  document.getElementById('adminMasterTab').style.display = which==='master'?'block':'none';
+  document.getElementById('adminActionMsg').textContent='';
+}
+function adminMsg(text, ok){
+  const m = document.getElementById('adminActionMsg');
+  m.style.color = ok ? 'var(--done)' : 'var(--overdue)';
+  m.textContent = text;
+}
+async function adminResetPin(){
+  const officer = document.getElementById('adminResetOfficer').value;
+  if(!officer){ adminMsg('No officer selected.', false); return; }
+  if(!confirm('Reset PIN for "'+officer+'"? They will set a new PIN next time they identify themselves.')) return;
+  try{
+    const res = await gasRequest({ action:'adminResetPin', masterHash:adminMasterHash, officer:officer });
+    if(!res || !res.ok){ adminMsg('Reset failed.', false); return; }
+    adminMsg('PIN reset for '+officer+'. They can now set a new PIN.', true);
+    await loadCredMeta();
+    enterAdminPanel(); adminShowTab('reset');
+  }catch(e){ adminMsg('Network error.', false); }
+}
+async function adminReassignTask(){
+  const taskId = document.getElementById('adminReassignTask').value;
+  const newOwner = document.getElementById('adminReassignOwner').value;
+  if(!taskId){ adminMsg('No task selected.', false); return; }
+  if(!newOwner){ adminMsg('Choose a new owner.', false); return; }
+  try{
+    const res = await gasRequest({ action:'adminReassign', masterHash:adminMasterHash, id:taskId, newOwner:newOwner });
+    if(!res || !res.ok){ adminMsg('Reassign failed.', false); return; }
+    adminMsg('Task reassigned to '+newOwner+'.', true);
+    await refreshTasks();
+    enterAdminPanel(); adminShowTab('reassign');
+  }catch(e){ adminMsg('Network error.', false); }
+}
+async function adminChangeMaster(){
+  const p1 = document.getElementById('adminChgNew1').value.trim();
+  const p2 = document.getElementById('adminChgNew2').value.trim();
+  if(!/^[0-9]{4,12}$/.test(p1)){ adminMsg('Master PIN must be 4–12 digits.', false); return; }
+  if(p1!==p2){ adminMsg('PINs do not match.', false); return; }
+  const newHash = await hashMaster(p1);
+  try{
+    const res = await gasRequest({ action:'adminSetMaster', oldHash:adminMasterHash, newHash:newHash });
+    if(!res || !res.ok){ adminMsg('Update failed.', false); return; }
+    adminMasterHash = newHash;
+    document.getElementById('adminChgNew1').value=''; document.getElementById('adminChgNew2').value='';
+    adminMsg('Master PIN updated.', true);
+  }catch(e){ adminMsg('Network error.', false); }
+}
 
 // Populate officer filter in toolbar from actual task data
 function populateOfficerFilter() {
